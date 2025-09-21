@@ -65,3 +65,81 @@ If you don’t have the tool:
 ### Test assertions
 
 - Tests should use pretty_assertions::assert_eq for clearer diffs. Import this at the top of the test module if it isn't already.
+
+## MCP Prompts & Argument‑Aware Custom Prompts
+
+This section guides contributions for the feature described in `docs/prd/PRD-mcp-prompts-and-arguments.md`. Follow these conventions so changes stay consistent and easy to review.
+
+- Scope and goals
+  - Add argument support to local custom prompts (e.g., `$1..$9` and `$ARGUMENTS`).
+  - Discover MCP prompts via `prompts/list` and expose them as slash commands.
+  - Invoke MCP prompts via `prompts/get`, map returned messages to user input, and provide an optional preview before sending.
+  - Refresh prompt lists on `notifications/prompts/list_changed`.
+
+- Crates you will likely touch
+  - `codex-rs/tui`: slash command palette UI, argument entry UI, preview rendering, and composer integration.
+  - `codex-rs/core`: MCP prompt discovery/caching and a simple API (events) for the TUI to consume; argument expansion for local prompts; minimal protocol surface if needed.
+  - `codex-rs/mcp-client`: wiring for `prompts/list`, `prompts/get`, and `notifications/prompts/list_changed` if not already surfaced through the manager.
+  - If you add or change protocol messages/events, update `codex-rs/protocol` and use `ts-rs` bindings in `codex-rs/protocol-ts` accordingly.
+
+- Slash command naming for MCP prompts
+  - Use `mcp__<server>__<prompt>` (double underscore separators) to avoid collisions.
+  - Sanitize to kebab‑case for display and matching; preserve a stable key for execution.
+  - Do not add new enum variants for each MCP prompt; merge dynamic items into the popup list alongside built‑ins and local prompts.
+
+- Local custom prompts with arguments
+  - Support `$1..$9` (individual positional args) and `$ARGUMENTS` (all args joined with a single space).
+  - Missing indices should expand to an empty string; leave literal `$$` untouched.
+  - Keep the implementation minimal and predictable; avoid shell‑like quoting/escaping beyond direct replacement.
+
+- Preview and provenance
+  - Provide an inline preview of the resolved messages before sending to the agent (especially for MCP prompts). Make it clear when content originates from MCP.
+  - Respect existing approvals and sandboxing; this feature must not auto‑run tools.
+
+- Refresh behaviour
+  - Listen for `notifications/prompts/list_changed` and update the in‑memory list used by the slash palette without requiring a restart.
+
+- TUI style and UX
+  - Follow the styling rules above (Stylize helpers, no hardcoded white, compact one‑line forms when possible).
+  - In the slash popup, show a short description and an argument hint when available; keep rows concise and readable.
+
+- Tests
+  - Add TUI snapshot tests that cover:
+    - Slash popup showing MCP commands (namespaced), with descriptions/hints.
+    - Preview rendering for both local and MCP prompts (representative cases).
+  - Unit tests for local prompt argument expansion, including edge cases (missing args, `$ARGUMENTS`, `$$`).
+  - If you change `core`/`protocol`, add targeted tests there and run the full suite.
+
+- Docs and config
+  - Update `docs/config.md` and `/help` to document argument support and MCP prompts.
+  - Keep offline behaviour for local prompts; MCP requires a connected server.
+
+- Build, lint, and test
+  - After code changes in Rust crates, run `just fmt`.
+  - Before finalizing, run `just fix -p <changed-crate>` (ask before running workspace‑wide).
+  - Tests:
+    - Always run `cargo test -p <changed-crate>`.
+    - If `common`, `core`, or `protocol` changed, ask before running `cargo test --all-features`.
+
+Notes
+- Do not modify any code related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
+- When formatting strings, prefer `format!("... {var}")` with inlined placeholders.
+
+## Architecture & Reference Docs
+
+These files are the fastest path to understanding how Codex fits together:
+
+- codex-rs/docs/protocol_v1.md – High‑level protocol spec: entities, SQ/EQ, task/turn flows.
+- codex-rs/protocol/src/protocol.rs – Authoritative `Op`/`EventMsg` types and payloads used across the workspace.
+- codex-rs/core/src/codex.rs – Core engine: session init, submission loop, model I/O, tool calls, approvals, diffs.
+- codex-rs/core/src/project_doc.rs – How AGENTS.md is discovered/merged and injected into model instructions.
+- codex-rs/core/prompt.md – Agent behavior, planning, approvals, and messaging conventions used by Codex.
+- codex-rs/core/README.md – Core crate assumptions and platform dependencies (Seatbelt, Linux sandbox, apply_patch).
+- codex-rs/tui/styles.md – TUI styling rules (colors, spans, wrapping) used in snapshot tests.
+- codex-rs/exec/src/event_processor_with_human_output.rs – Maps protocol events to human‑readable CLI output.
+- codex-rs/cli/src/main.rs – CLI entry points: interactive TUI, exec mode, MCP server, protocol stream.
+- docs/getting-started.md – CLI usage, tips, and memory with AGENTS.md.
+- docs/config.md – All configuration keys and behavior; see AGENTS.md integration knobs.
+- docs/sandbox.md and docs/platform-sandboxing.md – Execution sandbox design and platform specifics.
+
+Tip: Protocols are shared with external UIs via `codex-rs/protocol` (Rust) and `codex-rs/protocol-ts` (TypeScript bindings).
